@@ -79,7 +79,7 @@ type RedisLock struct {
 	enableWatchdog bool          //Whether to enable the watchdog to renew the lock
 	lockSignal     chan byte     //lock signal
 	unlockSignal   chan byte     //unlock signal
-	ctx            LockContext
+	ctx            LockContext   //current lock goroutine context
 }
 
 // NewRedisLock
