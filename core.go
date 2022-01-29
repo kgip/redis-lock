@@ -59,8 +59,12 @@ type Locker interface {
 	Unlock() bool
 }
 
+// LockContext goroutine lock context
 type LockContext context.Context
 
+// Context
+//Obtain the goroutine lock context, which is required when locking.
+//When using reentrant locks, the context of multiple locking must be the same.
 func Context() LockContext {
 	return context.WithValue(context.Background(), contextKey, uuid.NewV4().String())
 }
