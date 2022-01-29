@@ -86,8 +86,8 @@ type RedisLock struct {
 //lockKey and redisClient are required parameters, and options are optional parameters.
 //Among them, lockKey is the key stored in redis of the distributed lock, redisClient
 //is the operation client of redis, and the optional parameters of options include the
-//expiration time of the lock, Expire, the timeout time of acquiring the lock, and the
-//identifier of whether to start the watchdog renewal mechanism, EnableWatchdog.
+//expiration time of the lock, Expire, the timeout time of acquiring the lock, Timeout ,
+//and the identifier of whether to start the watchdog renewal mechanism, EnableWatchdog.
 //When passing parameters, a form such as Expire(20 * time.Second) can be used.
 func NewRedisLock(lockKey string, redisClient redis.Cmdable, options ...option) *RedisLock {
 	redisLock := &RedisLock{timeout: defaultTimeout, expire: defaultExpire, expireSecond: int(defaultExpire) / int(time.Second)}
