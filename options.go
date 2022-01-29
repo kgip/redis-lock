@@ -10,13 +10,27 @@ type option func(o interface{}) interface{}
 type optionHandler func(parameter interface{}) option
 
 var (
-	Key optionHandler = func(parameter interface{}) option {
+	key optionHandler = func(parameter interface{}) option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(string); ok {
+				if param == "" {
+					panic("lock key cannot be empty")
+				}
 				r.key = param
 			} else {
 				panic("Key is not of type string")
+			}
+			return o
+		}
+	}
+	client optionHandler = func(parameter interface{}) option {
+		return func(o interface{}) interface{} {
+			r := o.(*RedisLock)
+			if param, ok := parameter.(redis.Cmdable); ok {
+				r.client = param
+			} else {
+				panic("Context is not of type redis.Cmdable")
 			}
 			return o
 		}
@@ -47,13 +61,13 @@ var (
 			return o
 		}
 	}
-	Client optionHandler = func(parameter interface{}) option {
+	EnableWatchdog optionHandler = func(parameter interface{}) option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
-			if param, ok := parameter.(redis.Cmdable); ok {
-				r.client = param
+			if param, ok := parameter.(bool); ok {
+				r.enableWatchdog = param
 			} else {
-				panic("Context is not of type redis.Cmdable")
+				panic("EnableWatchdog is not of type bool")
 			}
 			return o
 		}
