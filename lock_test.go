@@ -3,11 +3,12 @@ package redis_lock
 import (
 	"github.com/go-redis/redis"
 	uuid "github.com/satori/go.uuid"
+	"sync"
 	"testing"
 	"time"
 )
 
-var Client = redis.NewClient(&redis.Options{Addr: "192.168.32.36:6379"})
+var Client = redis.NewClient(&redis.Options{Addr: "192.168.1.10:6379"})
 
 func TestUUID(t *testing.T) {
 	for i := 0; i < 10; i++ {
@@ -135,5 +136,62 @@ func TestHGet(t *testing.T) {
 		t.Error("nil")
 	} else {
 		t.Log(val)
+	}
+}
+
+func TestReentrant(t *testing.T) {
+	lock := NewRedisLock("counter", Client)
+	ctx := Context()
+	lock.Lock(ctx)
+	lock.Lock(ctx)
+	t.Log("lock success")
+	lock.Unlock()
+	lock.Unlock()
+}
+
+var wg = sync.WaitGroup{}
+
+func TestBatchSpeed(t *testing.T) {
+	lock := NewRedisLock("counter", Client)
+	wg.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			lock.Lock(Context())
+			time.Sleep(time.Millisecond)
+			lock.Unlock()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestRedisLock_Unlock(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		n := 0
+		lock := NewRedisLock("counter", Client)
+		wg.Add(20)
+		for i := 0; i < 10; i++ {
+			go func() {
+				ctx := Context()
+				lock.Lock(ctx)
+				lock.Lock(ctx)
+				n++
+				lock.Unlock()
+				lock.Unlock()
+				wg.Done()
+			}()
+		}
+
+		for i := 0; i < 10; i++ {
+			go func() {
+				ctx := Context()
+				lock.Lock(ctx)
+				n--
+				lock.Unlock()
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		t.Log(n)
 	}
 }

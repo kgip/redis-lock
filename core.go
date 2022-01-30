@@ -143,8 +143,8 @@ func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) bool {
 				return true
 			}
 		}
-		//Re-acquire the lock after waiting for 1 second
-		time.Sleep(time.Second)
+		//Re-acquire the lock after waiting for 5 millisecond
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
