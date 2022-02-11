@@ -1,4 +1,4 @@
-module redis-lock
+module github.com/kgip/redis-lock
 
 go 1.16
 
