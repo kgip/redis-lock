@@ -1,8 +1,7 @@
-package redis_lock
+package lock
 
 import (
 	"context"
-	"github.com/go-redis/redis"
 	uuid "github.com/satori/go.uuid"
 	"log"
 	"strconv"
@@ -71,15 +70,15 @@ func Context() LockContext {
 
 // RedisLock Redis distributed lock structure, implementing Locker interface
 type RedisLock struct {
-	key            string        //lock key
-	client         redis.Cmdable //redis connect client interface
-	timeout        time.Duration //lock Timeout for acquiring locks
-	expire         time.Duration //lock expiration time
-	expireSecond   int           //The number of seconds in which the lock expires
-	enableWatchdog bool          //Whether to enable the watchdog to renew the lock
-	lockSignal     chan byte     //lock signal
-	unlockSignal   chan byte     //unlock signal
-	ctx            LockContext   //current lock goroutine context
+	key            string             //lock key
+	client         RedisClientAdapter //redis connect client interface
+	timeout        time.Duration      //lock Timeout for acquiring locks
+	expire         time.Duration      //lock expiration time
+	expireSecond   int                //The number of seconds in which the lock expires
+	enableWatchdog bool               //Whether to enable the watchdog to renew the lock
+	lockSignal     chan byte          //lock signal
+	unlockSignal   chan byte          //unlock signal
+	ctx            LockContext        //current lock goroutine context
 }
 
 // NewRedisLock
@@ -89,7 +88,7 @@ type RedisLock struct {
 //expiration time of the lock, Expire, the timeout time of acquiring the lock, Timeout ,
 //and the identifier of whether to start the watchdog renewal mechanism, EnableWatchdog.
 //When passing parameters, a form such as Expire(20 * time.Second) can be used.
-func NewRedisLock(lockKey string, redisClient redis.Cmdable, options ...option) *RedisLock {
+func NewRedisLock(lockKey string, redisClient RedisClientAdapter, options ...option) *RedisLock {
 	redisLock := &RedisLock{timeout: defaultTimeout, expire: defaultExpire, expireSecond: int(defaultExpire) / int(time.Second)}
 	options = append(options, key(lockKey), client(redisClient)) //Add required parameters
 	for _, parameterize := range options {
@@ -106,11 +105,14 @@ func NewRedisLock(lockKey string, redisClient redis.Cmdable, options ...option) 
 				for {
 					select {
 					case <-redisLock.unlockSignal:
-						log.Println("end renew expire ")
+						log.Println("Redis lock watchdog end renew expire ")
 						break
 					case <-ticker.C:
-						redisLock.client.Expire(redisLock.key, redisLock.expire)
-						log.Printf("renew expire -------------------------------->%ds", redisLock.expireSecond)
+						if err := redisLock.client.Expire(redisLock.ctx, redisLock.key, redisLock.expire).Err; err != nil {
+							log.Printf("Redis lock watchdog renew expire failed: %v", err)
+							continue
+						}
+						log.Printf("Redis lock watchdog renew expire %ds", redisLock.expireSecond)
 					}
 				}
 			}
@@ -135,7 +137,7 @@ func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) bool {
 			log.Println("acquire lock timeout")
 			return false
 		default:
-			if r.client.Eval(lockScript, []string{r.key}, ctx.Value(contextKey), r.expireSecond).Val().(int64) == 1 { //The lock was acquired successfully
+			if r.client.Eval(ctx, lockScript, []string{r.key}, ctx.Value(contextKey), r.expireSecond).Val.(int64) == 1 { //The lock was acquired successfully
 				r.ctx = ctx
 				if r.enableWatchdog && r.getLockTimes() <= 1 {
 					r.lockSignal <- 0
@@ -149,7 +151,7 @@ func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) bool {
 }
 
 func (r *RedisLock) Unlock() bool {
-	if r.client.Eval(unlockScript, []string{r.key}, r.ctx.Value(contextKey)).Val().(int64) == 1 {
+	if r.client.Eval(r.ctx, unlockScript, []string{r.key}, r.ctx.Value(contextKey)).Val.(int64) == 1 {
 		if r.enableWatchdog && r.getLockTimes() <= 0 {
 			r.unlockSignal <- 0
 		}
@@ -160,7 +162,7 @@ func (r *RedisLock) Unlock() bool {
 
 //Get the number of locks
 func (r *RedisLock) getLockTimes() int64 {
-	val := r.client.HGet(r.key, r.ctx.Value(contextKey).(string)).Val()
+	val := r.client.HGet(r.ctx, r.key, r.ctx.Value(contextKey).(string)).StringVal()
 	if val == "" {
 		return 0
 	}

@@ -1,14 +1,19 @@
-package redis_lock
+package test
 
 import (
 	"github.com/go-redis/redis"
+	redisV8 "github.com/go-redis/redis/v8"
+	"github.com/kgip/redis-lock/adapters"
+	"github.com/kgip/redis-lock/lock"
 	uuid "github.com/satori/go.uuid"
 	"sync"
 	"testing"
 	"time"
 )
 
-var Client = redis.NewClient(&redis.Options{Addr: "192.168.1.10:6379"})
+var V8Client lock.RedisClientAdapter = adapters.NewGoRedisV8Adapter(redisV8.NewClient(&redisV8.Options{Addr: "192.168.1.10:6379"}))
+
+var Client lock.RedisClientAdapter = adapters.NewGoRedisAdapter(redis.NewClient(&redis.Options{Addr: "192.168.1.10:6379"}))
 
 func TestUUID(t *testing.T) {
 	for i := 0; i < 10; i++ {
@@ -17,7 +22,7 @@ func TestUUID(t *testing.T) {
 }
 
 func TestRedisOptions(t *testing.T) {
-	lock := NewRedisLock("key", &redis.Client{}, Timeout(5*time.Second))
+	lock := lock.NewRedisLock("key", adapters.NewGoRedisV8Adapter(&redisV8.Client{}), lock.Timeout(5*time.Second))
 	t.Log(lock)
 }
 
@@ -37,7 +42,7 @@ func TestDuration(t *testing.T) {
 
 func TestEval(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		t.Log(Client.Eval("if redis.call('hset', KEYS[1], ARGV[1], 1) then return 1 else return 0 end", []string{"aaaa"}, "bbbb").Val().(int64))
+		t.Log(Client.Eval(lock.Context(), "if redis.call('hset', KEYS[1], ARGV[1], 1) then return 1 else return 0 end", []string{"aaaa"}, "bbbb").Val.(int64))
 	}
 }
 
@@ -64,8 +69,8 @@ var LockScript = `if redis.call('exists',KEYS[1]) == 1 then
 
 func TestLockEval(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		eval := Client.Eval(LockScript, []string{"key1"}, "iheaifheoi", 1000)
-		if eval.Val().(int64) == 0 {
+		eval := Client.Eval(lock.Context(), LockScript, []string{"key1"}, "iheaifheoi", 1000)
+		if eval.Val.(int64) == 0 {
 			t.Error(eval)
 		} else {
 			t.Log(eval)
@@ -73,10 +78,10 @@ func TestLockEval(t *testing.T) {
 	}
 }
 
-var ctx = Context()
+var ctx = lock.Context()
 
 func TestLock(t *testing.T) {
-	lock := NewRedisLock("key1", Client)
+	lock := lock.NewRedisLock("key1", Client)
 	for i := 0; i < 2; i++ {
 		lock.Lock(ctx)
 	}
@@ -101,8 +106,8 @@ var UnlockScript = `if redis.call('exists',KEYS[1]) == 1 then
 
 func TestUnlockEval(t *testing.T) {
 	for i := 0; i < 99; i++ {
-		eval := Client.Eval(UnlockScript, []string{"key1"}, "iheaifheoi")
-		if eval.Val().(int64) == 0 {
+		eval := Client.Eval(lock.Context(), UnlockScript, []string{"key1"}, "iheaifheoi")
+		if eval.Val.(int64) == 0 {
 			t.Error(eval)
 		} else {
 			t.Log(eval)
@@ -111,7 +116,7 @@ func TestUnlockEval(t *testing.T) {
 }
 
 func TestUnlock(t *testing.T) {
-	lock := NewRedisLock("key1", Client)
+	lock := lock.NewRedisLock("key1", Client)
 	lock.Lock(ctx)
 	for i := 0; i < 20; i++ {
 		time.Sleep(time.Second)
@@ -121,7 +126,7 @@ func TestUnlock(t *testing.T) {
 }
 
 func TestWatchDog(t *testing.T) {
-	lock := NewRedisLock("key1", Client, EnableWatchdog(true), Expire(10*time.Second))
+	lock := lock.NewRedisLock("key1", Client, lock.EnableWatchdog(true), lock.Expire(10*time.Second))
 	lock.Lock(ctx)
 	for i := 0; i < 50; i++ {
 		time.Sleep(time.Second)
@@ -130,8 +135,8 @@ func TestWatchDog(t *testing.T) {
 	lock.Unlock()
 }
 
-func TestHGet(t *testing.T) {
-	val := Client.HGet("aaaa", "bbbb").Val()
+func TestAdapter(t *testing.T) {
+	val := Client.HGet(lock.Context(), "aaaa", "bbbb").Val
 	if val == "" {
 		t.Error("nil")
 	} else {
@@ -140,25 +145,25 @@ func TestHGet(t *testing.T) {
 }
 
 func TestReentrant(t *testing.T) {
-	lock := NewRedisLock("counter", Client)
-	ctx := Context()
-	lock.Lock(ctx)
-	lock.Lock(ctx)
+	locker := lock.NewRedisLock("counter", Client)
+	ctx := lock.Context()
+	locker.Lock(ctx)
+	locker.Lock(ctx)
 	t.Log("lock success")
-	lock.Unlock()
-	lock.Unlock()
+	locker.Unlock()
+	locker.Unlock()
 }
 
 var wg = sync.WaitGroup{}
 
 func TestBatchSpeed(t *testing.T) {
-	lock := NewRedisLock("counter", Client)
+	locker := lock.NewRedisLock("counter", Client)
 	wg.Add(100)
 	for i := 0; i < 100; i++ {
 		go func() {
-			lock.Lock(Context())
+			locker.Lock(lock.Context())
 			time.Sleep(time.Millisecond)
-			lock.Unlock()
+			locker.Unlock()
 			wg.Done()
 		}()
 	}
@@ -168,26 +173,26 @@ func TestBatchSpeed(t *testing.T) {
 func TestRedisLock_Unlock(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		n := 0
-		lock := NewRedisLock("counter", Client)
+		locker := lock.NewRedisLock("counter", Client)
 		wg.Add(20)
 		for i := 0; i < 10; i++ {
 			go func() {
-				ctx := Context()
-				lock.Lock(ctx)
-				lock.Lock(ctx)
+				ctx := lock.Context()
+				locker.Lock(ctx)
+				locker.Lock(ctx)
 				n++
-				lock.Unlock()
-				lock.Unlock()
+				locker.Unlock()
+				locker.Unlock()
 				wg.Done()
 			}()
 		}
 
 		for i := 0; i < 10; i++ {
 			go func() {
-				ctx := Context()
-				lock.Lock(ctx)
+				ctx := lock.Context()
+				locker.Lock(ctx)
 				n--
-				lock.Unlock()
+				locker.Unlock()
 				wg.Done()
 			}()
 		}

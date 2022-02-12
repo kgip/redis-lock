@@ -1,7 +1,6 @@
-package redis_lock
+package lock
 
 import (
-	"github.com/go-redis/redis"
 	"time"
 )
 
@@ -27,7 +26,7 @@ var (
 	client optionHandler = func(parameter interface{}) option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
-			if param, ok := parameter.(redis.Cmdable); ok {
+			if param, ok := parameter.(RedisClientAdapter); ok {
 				r.client = param
 			} else {
 				panic("Context is not of type redis.Cmdable")
