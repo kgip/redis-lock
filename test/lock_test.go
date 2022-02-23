@@ -200,3 +200,14 @@ func TestRedisLock_Unlock(t *testing.T) {
 		t.Log(n)
 	}
 }
+
+func TestRedisLockOperator(t *testing.T) {
+	lockOperator := lock.NewRedisLockOperator(V8Client)
+	var key = "aaa"
+	lockOperator.Lock(key, lock.Context())
+	for i := 0; i < 10; i++ {
+		t.Log("lock operator test")
+		time.Sleep(10 * time.Second)
+	}
+	lockOperator.Unlock(key)
+}
