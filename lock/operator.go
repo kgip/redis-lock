@@ -9,14 +9,14 @@ import (
 )
 
 type RedisLockOperator struct {
-	locks   *sync.Map //Save the mapping of lock keys to lock objects
+	locks   map[string]Locker //Save the mapping of lock keys to lock objects
 	mutex   *sync.Mutex
 	client  RedisClientAdapter //redis connect client interface
 	options []option
 }
 
 func NewRedisLockOperator(client RedisClientAdapter, options ...option) *RedisLockOperator {
-	return &RedisLockOperator{locks: &sync.Map{}, mutex: &sync.Mutex{}, client: client, options: options}
+	return &RedisLockOperator{locks: make(map[string]Locker), mutex: &sync.Mutex{}, client: client, options: options}
 }
 
 func handleError() error {
@@ -32,28 +32,16 @@ func handleError() error {
 	return nil
 }
 
-//tryGetLock Get the lock object from locks and return it. If it does not exist, return nil.
-func (operator *RedisLockOperator) tryGetLock(key string) Locker {
-	if lockItem, ok := operator.locks.Load(key); ok {
-		if lock, ok := lockItem.(Locker); ok {
-			return lock
-		} else {
-			panic(fmt.Sprintf("unknown object: %v", lock))
-		}
-	}
-	return nil
-}
-
 //GetLock Get the lock object from locks and return it.
 //If it does not exist, first create the lock object according to the key,
 //then save the lock object to locks, and finally return the lock object.
 func (operator *RedisLockOperator) GetLock(key string, options ...option) (lock Locker) {
-	if lock = operator.tryGetLock(key); lock == nil {
+	if lock = operator.locks[key]; lock == nil {
 		operator.mutex.Lock()
 		defer operator.mutex.Unlock()
-		if lock = operator.tryGetLock(key); lock == nil {
+		if lock = operator.locks[key]; lock == nil {
 			lock = NewRedisLock(key, operator.client, options...)
-			operator.locks.Store(key, lock)
+			operator.locks[key] = lock
 		}
 	}
 	return lock
@@ -82,7 +70,7 @@ func (operator *RedisLockOperator) Unlock(key string) bool {
 			log.Println(err)
 		}
 	}()
-	if lock := operator.tryGetLock(key); lock != nil {
+	if lock := operator.locks[key]; lock != nil {
 		return lock.Unlock()
 	}
 	return false
