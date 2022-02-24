@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-var V8Client lock.RedisClientAdapter = adapters.NewGoRedisV8Adapter(redisV8.NewClient(&redisV8.Options{Addr: "192.168.1.10:6379"}))
+var V8Client lock.RedisClientAdapter = adapters.NewGoRedisV8Adapter(redisV8.NewClient(&redisV8.Options{Addr: "192.168.32.20:6379"}))
 
-var Client lock.RedisClientAdapter = adapters.NewGoRedisAdapter(redis.NewClient(&redis.Options{Addr: "192.168.1.10:6379"}))
+var Client lock.RedisClientAdapter = adapters.NewGoRedisAdapter(redis.NewClient(&redis.Options{Addr: "192.168.32.20:6379"}))
 
 func TestUUID(t *testing.T) {
 	for i := 0; i < 10; i++ {
@@ -203,11 +203,32 @@ func TestRedisLock_Unlock(t *testing.T) {
 
 func TestRedisLockOperator(t *testing.T) {
 	lockOperator := lock.NewRedisLockOperator(V8Client)
-	var key = "aaa"
-	lockOperator.Lock(key, lock.Context())
+	key := "key1"
 	for i := 0; i < 10; i++ {
-		t.Log("lock operator test")
-		time.Sleep(10 * time.Second)
+		n := 0
+		wg.Add(20)
+		for i := 0; i < 10; i++ {
+			go func() {
+				ctx := lock.Context()
+				lockOperator.Lock(key, ctx)
+				lockOperator.Lock(key, ctx)
+				n++
+				lockOperator.Unlock(key)
+				lockOperator.Unlock(key)
+				wg.Done()
+			}()
+		}
+
+		for i := 0; i < 10; i++ {
+			go func() {
+				ctx := lock.Context()
+				lockOperator.GetLock(key).Lock(ctx)
+				n--
+				lockOperator.GetLock(key).Unlock()
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		t.Log(n)
 	}
-	lockOperator.Unlock(key)
 }

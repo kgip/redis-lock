@@ -45,6 +45,8 @@ const (
                             elseif redis.call('hset', KEYS[1], ARGV[1], r) then
                                 return 1
 							end
+						else 
+                            return 1
 						end
                     else 
                         return 1

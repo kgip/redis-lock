@@ -40,6 +40,7 @@ func (operator *RedisLockOperator) GetLock(key string, options ...option) (lock 
 		operator.mutex.Lock()
 		defer operator.mutex.Unlock()
 		if lock = operator.locks[key]; lock == nil {
+			log.Printf("Create a new lock with key: %s", key)
 			lock = NewRedisLock(key, operator.client, options...)
 			operator.locks[key] = lock
 		}
