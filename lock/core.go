@@ -90,7 +90,7 @@ type RedisLock struct {
 //expiration time of the lock, Expire, the timeout time of acquiring the lock, Timeout ,
 //and the identifier of whether to start the watchdog renewal mechanism, EnableWatchdog.
 //When passing parameters, a form such as Expire(20 * time.Second) can be used.
-func NewRedisLock(lockKey string, redisClient RedisClientAdapter, options ...option) *RedisLock {
+func NewRedisLock(lockKey string, redisClient RedisClientAdapter, options ...Option) *RedisLock {
 	redisLock := &RedisLock{timeout: defaultTimeout, expire: defaultExpire, expireSecond: int(defaultExpire) / int(time.Second)}
 	options = append(options, key(lockKey), client(redisClient)) //Add required parameters
 	for _, parameterize := range options {

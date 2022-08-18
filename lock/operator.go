@@ -8,14 +8,21 @@ import (
 	"time"
 )
 
+type LockOperator interface {
+	GetLock(key string, options ...Option) (lock Locker)
+	Lock(key string, ctx LockContext) (err error)
+	TryLock(key string, ctx LockContext, timeout time.Duration) bool
+	Unlock(key string) bool
+}
+
 type RedisLockOperator struct {
 	locks   map[string]Locker //Save the mapping of lock keys to lock objects
 	mutex   *sync.Mutex
 	client  RedisClientAdapter //redis connect client interface
-	options []option
+	options []Option
 }
 
-func NewRedisLockOperator(client RedisClientAdapter, options ...option) *RedisLockOperator {
+func NewRedisLockOperator(client RedisClientAdapter, options ...Option) *RedisLockOperator {
 	return &RedisLockOperator{locks: make(map[string]Locker), mutex: &sync.Mutex{}, client: client, options: options}
 }
 
@@ -35,7 +42,7 @@ func handleError() error {
 //GetLock Get the lock object from locks and return it.
 //If it does not exist, first create the lock object according to the key,
 //then save the lock object to locks, and finally return the lock object.
-func (operator *RedisLockOperator) GetLock(key string, options ...option) (lock Locker) {
+func (operator *RedisLockOperator) GetLock(key string, options ...Option) (lock Locker) {
 	if lock = operator.locks[key]; lock == nil {
 		operator.mutex.Lock()
 		defer operator.mutex.Unlock()

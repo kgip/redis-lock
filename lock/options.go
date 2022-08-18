@@ -4,12 +4,12 @@ import (
 	"time"
 )
 
-type option func(o interface{}) interface{}
+type Option func(o interface{}) interface{}
 
-type optionHandler func(parameter interface{}) option
+type optionHandler func(parameter interface{}) Option
 
 var (
-	key optionHandler = func(parameter interface{}) option {
+	key optionHandler = func(parameter interface{}) Option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(string); ok {
@@ -23,7 +23,7 @@ var (
 			return o
 		}
 	}
-	client optionHandler = func(parameter interface{}) option {
+	client optionHandler = func(parameter interface{}) Option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(RedisClientAdapter); ok {
@@ -34,7 +34,7 @@ var (
 			return o
 		}
 	}
-	Expire optionHandler = func(parameter interface{}) option {
+	Expire optionHandler = func(parameter interface{}) Option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(time.Duration); ok {
@@ -49,7 +49,7 @@ var (
 			return o
 		}
 	}
-	Timeout optionHandler = func(parameter interface{}) option {
+	Timeout optionHandler = func(parameter interface{}) Option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(time.Duration); ok {
@@ -60,7 +60,7 @@ var (
 			return o
 		}
 	}
-	EnableWatchdog optionHandler = func(parameter interface{}) option {
+	EnableWatchdog optionHandler = func(parameter interface{}) Option {
 		return func(o interface{}) interface{} {
 			r := o.(*RedisLock)
 			if param, ok := parameter.(bool); ok {
