@@ -8,10 +8,10 @@ import (
 )
 
 type GoRedisV8Adapter struct {
-	client *redisV8.Client
+	client redisV8.Cmdable
 }
 
-func NewGoRedisV8Adapter(client *redisV8.Client) *GoRedisV8Adapter {
+func NewGoRedisV8Adapter(client redisV8.Cmdable) *GoRedisV8Adapter {
 	if client == nil {
 		panic("client can not be nil")
 	}
