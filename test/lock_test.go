@@ -36,9 +36,6 @@ func TestWatchDog(t *testing.T) {
 	lock, _ := lock.NewRedisLock("testWatchDogLockKey", Client, &lock.Config{EnableWatchdog: true, Expire: 10 * time.Second})
 	err := lock.Lock(ctx)
 	assert.Equal(t, err, nil)
-	defer func() {
-
-	}()
 	for i := 0; i < 20; i++ {
 		time.Sleep(time.Second)
 		t.Log("waiting!!!!!!!!!!!")
