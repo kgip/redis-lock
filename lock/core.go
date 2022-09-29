@@ -2,8 +2,9 @@ package lock
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	uuid "github.com/satori/go.uuid"
-	"log"
 	"strconv"
 	"time"
 )
@@ -55,9 +56,9 @@ const (
 )
 
 type Locker interface {
-	Lock(ctx LockContext)
-	TryLock(ctx LockContext, time time.Duration) bool //Attempt to lock for a fixed duration
-	Unlock() bool
+	Lock(ctx LockContext) error
+	TryLock(ctx LockContext, time time.Duration) error //Attempt to lock for a fixed duration
+	Unlock() (bool, error)
 }
 
 // LockContext goroutine lock context
@@ -70,81 +71,107 @@ func Context() LockContext {
 	return context.WithValue(context.Background(), contextKey, uuid.NewV4().String())
 }
 
+type Config struct {
+	Timeout        time.Duration //lock Timeout for acquiring locks
+	Expire         time.Duration //lock expiration time
+	EnableWatchdog bool          //Whether to enable the watchdog to renew the lock
+	Logger         Logger
+}
+
 // RedisLock Redis distributed lock structure, implementing Locker interface
 type RedisLock struct {
-	key            string             //lock key
-	client         RedisClientAdapter //redis connect client interface
-	timeout        time.Duration      //lock Timeout for acquiring locks
-	expire         time.Duration      //lock expiration time
-	expireSecond   int                //The number of seconds in which the lock expires
-	enableWatchdog bool               //Whether to enable the watchdog to renew the lock
-	lockSignal     chan byte          //lock signal
-	unlockSignal   chan byte          //unlock signal
-	ctx            LockContext        //current lock goroutine context
+	key          string             //lock key
+	client       RedisClientAdapter //redis connect client interface
+	config       *Config
+	lockSignal   chan byte   //lock signal
+	unlockSignal chan byte   //unlock signal
+	ctx          LockContext //current lock goroutine context
 }
 
 // NewRedisLock
 //lockKey and redisClient are required parameters, and options are optional parameters.
-//Among them, lockKey is the key stored in redis of the distributed lock, redisClient
-//is the operation client of redis, and the optional parameters of options include the
-//expiration time of the lock, Expire, the timeout time of acquiring the lock, Timeout ,
-//and the identifier of whether to start the watchdog renewal mechanism, EnableWatchdog.
-//When passing parameters, a form such as Expire(20 * time.Second) can be used.
-func NewRedisLock(lockKey string, redisClient RedisClientAdapter, options ...Option) *RedisLock {
-	redisLock := &RedisLock{timeout: defaultTimeout, expire: defaultExpire, expireSecond: int(defaultExpire) / int(time.Second)}
-	options = append(options, key(lockKey), client(redisClient)) //Add required parameters
-	for _, parameterize := range options {
-		parameterize(redisLock)
+func NewRedisLock(lockKey string, redisClient RedisClientAdapter, config *Config) (*RedisLock, error) {
+	if lockKey == "" {
+		return nil, KeyEmptyError
 	}
-	if redisLock.enableWatchdog {
+	if redisClient == nil {
+		return nil, RedisClientNilError
+	}
+	if config == nil {
+		config = &Config{
+			Timeout: defaultTimeout,
+			Expire:  defaultExpire,
+			Logger:  &DefaultLogger{Level: Info, Log: Zap()},
+		}
+	} else {
+		if config.Timeout <= 0 {
+			config.Timeout = defaultTimeout
+		}
+		if config.Expire <= 0 {
+			config.Expire = defaultExpire
+		}
+		if config.Logger == nil {
+			config.Logger = &DefaultLogger{Level: Info, Log: Zap()}
+		}
+	}
+	redisLock := &RedisLock{key: lockKey, client: redisClient, config: config}
+	if redisLock.config.EnableWatchdog {
 		redisLock.lockSignal = make(chan byte)
 		redisLock.unlockSignal = make(chan byte)
-		ticker := time.NewTicker(redisLock.expire / 2)
+		ticker := time.NewTicker(redisLock.config.Expire / 2)
 		//Start watchdog renewal goroutine
 		go func() {
 			for range redisLock.lockSignal {
-				ticker.Reset(redisLock.expire / 2)
+				ticker.Reset(redisLock.config.Expire / 2)
 				for {
 					select {
 					case <-redisLock.unlockSignal:
-						log.Println("Redis lock watchdog end renew expire ")
-						break
+						redisLock.config.Logger.Info("Redis lock watchdog end renew expire")
+						return
 					case <-ticker.C:
-						if err := redisLock.client.Expire(redisLock.ctx, redisLock.key, redisLock.expire).Err; err != nil {
-							log.Printf("Redis lock watchdog renew expire failed: %v", err)
+						if err := redisLock.client.Expire(redisLock.ctx, redisLock.key, redisLock.config.Expire).Err; err != nil {
+							redisLock.config.Logger.Error(fmt.Sprintf("Redis lock watchdog renew expire failed: %v", err))
 							continue
 						}
-						log.Printf("Redis lock watchdog renew expire %ds", redisLock.expireSecond)
+						redisLock.config.Logger.Info(fmt.Sprintf("Redis lock watchdog renew expire %ds", redisLock.config.Expire/time.Second))
 					}
 				}
 			}
 		}()
 	}
-	return redisLock
+	return redisLock, nil
 }
 
 // Lock ctx is the context of the current goroutine, which can be obtained through Context()
-func (r *RedisLock) Lock(ctx LockContext) {
-	if !r.TryLock(ctx, r.timeout) {
-		panic("acquire lock timeout")
-	}
+func (r *RedisLock) Lock(ctx LockContext) error {
+	return r.TryLock(ctx, r.config.Timeout)
 }
 
 // TryLock ctx is the context of the current goroutine, which can be obtained through Context(). timeout is the maximum wait time to acquire a lock.
-func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) bool {
+func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
 	t := time.NewTimer(timeout)
 	for {
 		select {
 		case <-t.C:
-			log.Println("acquire lock timeout")
-			return false
+			return TimeoutError
 		default:
-			if r.client.Eval(ctx, lockScript, []string{r.key}, ctx.Value(contextKey), r.expireSecond).Val.(int64) == 1 { //The lock was acquired successfully
+			eval := r.client.Eval(ctx, lockScript, []string{r.key}, ctx.Value(contextKey), int(r.config.Expire/time.Second))
+			if eval.Err != nil {
+				return eval.Err
+			}
+			if eval.Val != nil && eval.Val.(int64) == 1 { //The lock was acquired successfully
 				r.ctx = ctx
-				if r.enableWatchdog && r.getLockTimes() <= 1 {
+				lockTimes, err := r.getLockTimes()
+				if err != nil {
+					return err
+				}
+				if r.config.EnableWatchdog && lockTimes <= 1 {
 					r.lockSignal <- 0
 				}
-				return true
+				return nil
 			}
 		}
 		//Re-acquire the lock after waiting for 5 millisecond
@@ -152,25 +179,29 @@ func (r *RedisLock) TryLock(ctx LockContext, timeout time.Duration) bool {
 	}
 }
 
-func (r *RedisLock) Unlock() bool {
+func (r *RedisLock) Unlock() (bool, error) {
 	if r.client.Eval(r.ctx, unlockScript, []string{r.key}, r.ctx.Value(contextKey)).Val.(int64) == 1 {
-		if r.enableWatchdog && r.getLockTimes() <= 0 {
+		lockTimes, err := r.getLockTimes()
+		if err != nil {
+			return true, err
+		}
+		if r.config.EnableWatchdog && lockTimes <= 0 {
 			r.unlockSignal <- 0
 		}
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 //Get the number of locks
-func (r *RedisLock) getLockTimes() int64 {
+func (r *RedisLock) getLockTimes() (int64, error) {
 	val := r.client.HGet(r.ctx, r.key, r.ctx.Value(contextKey).(string)).StringVal()
 	if val == "" {
-		return 0
+		return 0, nil
 	}
 	times, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
-		log.Panicf("Redis Error! Get lock times failed : %s!", err.Error())
+		return 0, errors.New(fmt.Sprintf("Redis Error! Get lock times failed : %s!", err.Error()))
 	}
-	return times
+	return times, nil
 }
