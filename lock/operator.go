@@ -7,10 +7,10 @@ import (
 )
 
 type LockOperator interface {
-	GetLock(key string, config Config) (lock Locker)
-	Lock(key string, ctx LockContext) (err error)
-	TryLock(key string, ctx LockContext, timeout time.Duration) bool
-	Unlock(key string) bool
+	GetLock(key string, config Config) (lock Locker, err error)
+	Lock(key string, ctx LockContext) error
+	TryLock(key string, ctx LockContext, timeout time.Duration) error
+	Unlock(key string) (bool, error)
 }
 
 type RedisLockOperator struct {
